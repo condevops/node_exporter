@@ -1,0 +1,950 @@
+From 94825125d3fb2c74668699a7541b1f660212a1c5 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Tue, 23 Jan 2018 13:43:23 +0100
+Subject: [PATCH 01/15] Added threads gathering for linux system
+
+---
+ collector/linux_threads.go      | 85 +++++++++++++++++++++++++++++++++++++++++
+ collector/linux_threads_test.go | 17 +++++++++
+ 2 files changed, 102 insertions(+)
+ create mode 100644 collector/linux_threads.go
+ create mode 100644 collector/linux_threads_test.go
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+new file mode 100644
+index 00000000..4b7dd853
+--- /dev/null
++++ b/collector/linux_threads.go
+@@ -0,0 +1,85 @@
++// Copyright 2015 The Prometheus Authors
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++// build+ !nothreads
++
++package collector
++
++import (
++	"fmt"
++	"io/ioutil"
++	"regexp"
++	"strings"
++	"strconv"
++	"github.com/prometheus/client_golang/prometheus"
++	"github.com/prometheus/common/log"
++)
++
++type threadsCollector struct {
++	threadAlloc *prometheus.Desc
++}
++func init() {
++	registerCollector("threads", defaultDisabled, NewThreadsCollector)
++}
++
++func NewThreadsCollector() (Collector, error) {
++	return &threadsCollector{
++		threadAlloc: prometheus.NewDesc(
++			prometheus.BuildFQName(namespace,"", "threads"),
++			"Allocated thread",
++			nil, nil,
++		),
++	}, nil
++}
++func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
++	val, err := readProcessStatus()
++	if err != nil {
++		return fmt.Errorf("Unable to retrieve number of threads %v\n", err)
++	}
++	ch <- prometheus.MustNewConstMetric(t.threadAlloc, prometheus.GaugeValue, float64(val))
++	return nil
++}
++
++func readProcessStatus() (int, error) {
++	processDir, err := regexp.Compile("([0-9]){1,8}")
++	folders, err := ioutil.ReadDir("/proc")
++	if err != nil {
++		fmt.Println(err)
++		return 0, err
++	}
++	threads := 0
++	for _, f := range folders {
++		if f.IsDir() && processDir.MatchString(f.Name()) {
++			file, err := ioutil.ReadFile("/proc/" + f.Name() + "/status")
++			if err != nil {
++				log.Error(err)
++				return 0, err
++			}
++			line := strings.Split(string(file), "\n")
++			if err != nil {
++				return 0, err
++			}
++			for _, l := range line {
++				if strings.Contains(string(l), "Threads:") {
++					threadStr := strings.Split(string(l), ":")
++					tread, err :=  strconv.Atoi(threadStr[1])
++					if err != nil {
++						return 0, err
++					}
++					threads += tread
++				}
++			}
++		}
++	}
++	return threads, nil
++}
+\ No newline at end of file
+diff --git a/collector/linux_threads_test.go b/collector/linux_threads_test.go
+new file mode 100644
+index 00000000..3d2d07ac
+--- /dev/null
++++ b/collector/linux_threads_test.go
+@@ -0,0 +1,17 @@
++package collector
++
++import (
++	"testing"
++)
++
++func TestReadProcessStatus(t *testing.T) {
++	want := 4
++	threads, err := readProcessStatus()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if threads < want {
++		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d",threads,want)
++	}
++
++}
+\ No newline at end of file
+
+From 96e4b4f3cc07ce4aacac7392945c7da81e6ad734 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Tue, 23 Jan 2018 13:54:02 +0100
+Subject: [PATCH 02/15] Removed debug messages and added missing error handler
+
+---
+ collector/linux_threads.go | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 4b7dd853..334d926a 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -52,9 +52,11 @@ func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
+ 
+ func readProcessStatus() (int, error) {
+ 	processDir, err := regexp.Compile("([0-9]){1,8}")
++	if err != nil {
++		return 0, err
++	}
+ 	folders, err := ioutil.ReadDir("/proc")
+ 	if err != nil {
+-		fmt.Println(err)
+ 		return 0, err
+ 	}
+ 	threads := 0
+@@ -62,7 +64,6 @@ func readProcessStatus() (int, error) {
+ 		if f.IsDir() && processDir.MatchString(f.Name()) {
+ 			file, err := ioutil.ReadFile("/proc/" + f.Name() + "/status")
+ 			if err != nil {
+-				log.Error(err)
+ 				return 0, err
+ 			}
+ 			line := strings.Split(string(file), "\n")
+
+From 3a47eac772761404d077870d8d3144a1d6f04212 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Tue, 23 Jan 2018 13:57:21 +0100
+Subject: [PATCH 03/15] Unused imports
+
+---
+ collector/linux_threads.go | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 334d926a..6f62374e 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -22,7 +22,6 @@ import (
+ 	"strings"
+ 	"strconv"
+ 	"github.com/prometheus/client_golang/prometheus"
+-	"github.com/prometheus/common/log"
+ )
+ 
+ type threadsCollector struct {
+
+From c1ff63f7cbf3bc576a86e0f68b1a6d02640d2a51 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Tue, 23 Jan 2018 14:01:23 +0100
+Subject: [PATCH 04/15] Fix separator for splitting line
+
+---
+ collector/linux_threads.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 6f62374e..0e82eb24 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -71,7 +71,7 @@ func readProcessStatus() (int, error) {
+ 			}
+ 			for _, l := range line {
+ 				if strings.Contains(string(l), "Threads:") {
+-					threadStr := strings.Split(string(l), ":")
++					threadStr := strings.Split(string(l), "\t")
+ 					tread, err :=  strconv.Atoi(threadStr[1])
+ 					if err != nil {
+ 						return 0, err
+
+From 396a934dc7d3482962757cbecbcce329d007302e Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Tue, 23 Jan 2018 14:22:46 +0100
+Subject: [PATCH 05/15] Added break in case match condition in order not to
+ interate accross whole file
+
+---
+ collector/linux_threads.go | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 0e82eb24..c0af4221 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -77,6 +77,7 @@ func readProcessStatus() (int, error) {
+ 						return 0, err
+ 					}
+ 					threads += tread
++					break
+ 				}
+ 			}
+ 		}
+
+From 475ff46577fcffbc72a918d50b06f9be467b918c Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Tue, 23 Jan 2018 14:33:29 +0100
+Subject: [PATCH 06/15] Improved help message
+
+---
+ collector/linux_threads.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index c0af4221..0a6c8e2b 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -35,7 +35,7 @@ func NewThreadsCollector() (Collector, error) {
+ 	return &threadsCollector{
+ 		threadAlloc: prometheus.NewDesc(
+ 			prometheus.BuildFQName(namespace,"", "threads"),
+-			"Allocated thread",
++			"Allocated threads in system",
+ 			nil, nil,
+ 		),
+ 	}, nil
+
+From 5bab64f8bea0075771454e4c223794f4c6ea0af0 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Wed, 24 Jan 2018 10:49:17 +0100
+Subject: [PATCH 07/15] Changed read proc to prometheus package
+
+---
+ collector/linux_threads.go      | 51 ++++++++++++-----------------------------
+ collector/linux_threads_test.go |  2 +-
+ 2 files changed, 16 insertions(+), 37 deletions(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 0a6c8e2b..c2f21c9d 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -11,22 +11,20 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ 
+-// build+ !nothreads
++// +build !nothreads
+ 
+ package collector
+ 
+ import (
+ 	"fmt"
+-	"io/ioutil"
+-	"regexp"
+-	"strings"
+-	"strconv"
+ 	"github.com/prometheus/client_golang/prometheus"
++	"github.com/prometheus/procfs"
+ )
+ 
+ type threadsCollector struct {
+ 	threadAlloc *prometheus.Desc
+ }
++
+ func init() {
+ 	registerCollector("threads", defaultDisabled, NewThreadsCollector)
+ }
+@@ -34,14 +32,14 @@ func init() {
+ func NewThreadsCollector() (Collector, error) {
+ 	return &threadsCollector{
+ 		threadAlloc: prometheus.NewDesc(
+-			prometheus.BuildFQName(namespace,"", "threads"),
++			prometheus.BuildFQName(namespace, "", "threads"),
+ 			"Allocated threads in system",
+ 			nil, nil,
+ 		),
+ 	}, nil
+ }
+ func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
+-	val, err := readProcessStatus()
++	val, err := getAllocatedThreads()
+ 	if err != nil {
+ 		return fmt.Errorf("Unable to retrieve number of threads %v\n", err)
+ 	}
+@@ -49,38 +47,19 @@ func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
+ 	return nil
+ }
+ 
+-func readProcessStatus() (int, error) {
+-	processDir, err := regexp.Compile("([0-9]){1,8}")
++func getAllocatedThreads() (int, error) {
++	p, err := procfs.AllProcs()
+ 	if err != nil {
+ 		return 0, err
+ 	}
+-	folders, err := ioutil.ReadDir("/proc")
+-	if err != nil {
+-		return 0, err
+-	}
+-	threads := 0
+-	for _, f := range folders {
+-		if f.IsDir() && processDir.MatchString(f.Name()) {
+-			file, err := ioutil.ReadFile("/proc/" + f.Name() + "/status")
+-			if err != nil {
+-				return 0, err
+-			}
+-			line := strings.Split(string(file), "\n")
+-			if err != nil {
+-				return 0, err
+-			}
+-			for _, l := range line {
+-				if strings.Contains(string(l), "Threads:") {
+-					threadStr := strings.Split(string(l), "\t")
+-					tread, err :=  strconv.Atoi(threadStr[1])
+-					if err != nil {
+-						return 0, err
+-					}
+-					threads += tread
+-					break
+-				}
+-			}
++	thread := 0
++	for _, pid := range p {
++		stat, err := pid.NewStat()
++		if err != nil {
++			return 0, err
+ 		}
++		thread += stat.NumThreads
++
+ 	}
+-	return threads, nil
++	return thread, nil
+ }
+\ No newline at end of file
+diff --git a/collector/linux_threads_test.go b/collector/linux_threads_test.go
+index 3d2d07ac..814b9eed 100644
+--- a/collector/linux_threads_test.go
++++ b/collector/linux_threads_test.go
+@@ -6,7 +6,7 @@ import (
+ 
+ func TestReadProcessStatus(t *testing.T) {
+ 	want := 4
+-	threads, err := readProcessStatus()
++	threads, err := getAllocatedThreads()
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+
+From f35116c4e5ec679e35030158ef09309350d32c75 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Thu, 25 Jan 2018 16:41:19 +0100
+Subject: [PATCH 08/15] Added threads-all metrics in order to have possibility
+ to confire alarm
+
+---
+ collector/linux_threads.go      | 29 ++++++++++++++++++++++++++++-
+ collector/linux_threads_test.go |  8 ++++++++
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index c2f21c9d..8256c8bc 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -19,10 +19,14 @@ import (
+ 	"fmt"
+ 	"github.com/prometheus/client_golang/prometheus"
+ 	"github.com/prometheus/procfs"
++	"io/ioutil"
++	"strconv"
++	"strings"
+ )
+ 
+ type threadsCollector struct {
+ 	threadAlloc *prometheus.Desc
++	threadMax *prometheus.Desc
+ }
+ 
+ func init() {
+@@ -36,14 +40,24 @@ func NewThreadsCollector() (Collector, error) {
+ 			"Allocated threads in system",
+ 			nil, nil,
+ 		),
++		threadMax: prometheus.NewDesc(
++			prometheus.BuildFQName(namespace, "threads", "max"),
++			"Limit of threads in the system",
++			nil, nil,
++		),
+ 	}, nil
+ }
+ func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
+ 	val, err := getAllocatedThreads()
+ 	if err != nil {
+-		return fmt.Errorf("Unable to retrieve number of threads %v\n", err)
++		return fmt.Errorf("Unable to retrieve number of allocated threads %v\n", err)
+ 	}
+ 	ch <- prometheus.MustNewConstMetric(t.threadAlloc, prometheus.GaugeValue, float64(val))
++	maxThreads, err := getMaxThreads()
++	if err != nil {
++		return fmt.Errorf("Unable to retrieve limit number of threads %v\n", err)
++	}
++	ch <- prometheus.MustNewConstMetric(t.threadMax, prometheus.GaugeValue, float64(maxThreads))
+ 	return nil
+ }
+ 
+@@ -62,4 +76,17 @@ func getAllocatedThreads() (int, error) {
+ 
+ 	}
+ 	return thread, nil
++}
++
++func getMaxThreads() (int, error) {
++	rawData, err := ioutil.ReadFile("/proc/sys/kernel/threads-max")
++	if err != nil {
++		return 0, nil
++	}
++	maxThreads, err := strconv.Atoi(strings.Trim(string(rawData),"\n"))
++	if err != nil {
++		return 0, nil
++	}
++	return maxThreads, nil
++
+ }
+\ No newline at end of file
+diff --git a/collector/linux_threads_test.go b/collector/linux_threads_test.go
+index 814b9eed..b87acb07 100644
+--- a/collector/linux_threads_test.go
++++ b/collector/linux_threads_test.go
+@@ -13,5 +13,13 @@ func TestReadProcessStatus(t *testing.T) {
+ 	if threads < want {
+ 		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d",threads,want)
+ 	}
++	max, err := getMaxThreads()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if max <= 0 {
++		t.Fatalf("Maximum allowed amount of threads in the system %d which sould be" +
++			"greated than 0",max)
++	}
+ 
+ }
+\ No newline at end of file
+
+From 5c0f905ab36d7cd84dabc1d8d2c9be0396694549 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Fri, 2 Feb 2018 14:02:31 +0100
+Subject: [PATCH 09/15] Added amount of process with different status as per PR
+ #633
+
+---
+ collector/linux_threads.go      | 23 +++++++++++++++++------
+ collector/linux_threads_test.go |  6 +++++-
+ end-to-end-test.sh              |  1 +
+ 3 files changed, 23 insertions(+), 7 deletions(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 8256c8bc..625e7dcf 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -27,6 +27,7 @@ import (
+ type threadsCollector struct {
+ 	threadAlloc *prometheus.Desc
+ 	threadMax *prometheus.Desc
++	procsState   *prometheus.Desc
+ }
+ 
+ func init() {
+@@ -45,37 +46,47 @@ func NewThreadsCollector() (Collector, error) {
+ 			"Limit of threads in the system",
+ 			nil, nil,
+ 		),
++		procsState: prometheus.NewDesc(
++			prometheus.BuildFQName(namespace, "", "procs_state"),
++			"Number of processes in each state.",
++			[]string{"state"}, nil,
++		),
+ 	}, nil
+ }
+ func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
+-	val, err := getAllocatedThreads()
++	states ,threads, err := getAllocatedThreads()
+ 	if err != nil {
+ 		return fmt.Errorf("Unable to retrieve number of allocated threads %v\n", err)
+ 	}
+-	ch <- prometheus.MustNewConstMetric(t.threadAlloc, prometheus.GaugeValue, float64(val))
++	ch <- prometheus.MustNewConstMetric(t.threadAlloc, prometheus.GaugeValue, float64(threads))
+ 	maxThreads, err := getMaxThreads()
+ 	if err != nil {
+ 		return fmt.Errorf("Unable to retrieve limit number of threads %v\n", err)
+ 	}
+ 	ch <- prometheus.MustNewConstMetric(t.threadMax, prometheus.GaugeValue, float64(maxThreads))
++	for state := range states {
++		ch <- prometheus.MustNewConstMetric(t.procsState, prometheus.GaugeValue, float64(states[state]), state)
++	}
+ 	return nil
+ }
+ 
+-func getAllocatedThreads() (int, error) {
++func getAllocatedThreads() (map[string]int32,int, error) {
+ 	p, err := procfs.AllProcs()
+ 	if err != nil {
+-		return 0, err
++		return nil, 0, err
+ 	}
+ 	thread := 0
++	procStates := make(map[string]int32)
+ 	for _, pid := range p {
+ 		stat, err := pid.NewStat()
+ 		if err != nil {
+-			return 0, err
++			return nil, 0, err
+ 		}
++		procStates[stat.State] += 1
+ 		thread += stat.NumThreads
+ 
+ 	}
+-	return thread, nil
++	return procStates,thread, nil
+ }
+ 
+ func getMaxThreads() (int, error) {
+diff --git a/collector/linux_threads_test.go b/collector/linux_threads_test.go
+index b87acb07..3ea5928f 100644
+--- a/collector/linux_threads_test.go
++++ b/collector/linux_threads_test.go
+@@ -6,13 +6,17 @@ import (
+ 
+ func TestReadProcessStatus(t *testing.T) {
+ 	want := 4
+-	threads, err := getAllocatedThreads()
++	states, threads, err := getAllocatedThreads()
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+ 	if threads < want {
+ 		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d",threads,want)
+ 	}
++	if states ==  nil {
++
++		t.Fatalf("Prcess states cannot be nil %v:" ,states)
++	}
+ 	max, err := getMaxThreads()
+ 	if err != nil {
+ 		t.Fatal(err)
+diff --git a/end-to-end-test.sh b/end-to-end-test.sh
+index c60008ee..0bbec3b1 100755
+--- a/end-to-end-test.sh
++++ b/end-to-end-test.sh
+@@ -43,6 +43,7 @@ disabled_collectors=$(cat << COLLECTORS
+   timex
+   uname
+   vmstat
++  threads
+ COLLECTORS
+ )
+ cd "$(dirname $0)"
+
+From 16953b619f36c478a62348cd77065c3e25c729b7 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Fri, 2 Feb 2018 14:09:36 +0100
+Subject: [PATCH 10/15] Improved error messages for unit tests
+
+---
+ collector/linux_threads_test.go | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/collector/linux_threads_test.go b/collector/linux_threads_test.go
+index 3ea5928f..933e1f0a 100644
+--- a/collector/linux_threads_test.go
++++ b/collector/linux_threads_test.go
+@@ -8,7 +8,7 @@ func TestReadProcessStatus(t *testing.T) {
+ 	want := 4
+ 	states, threads, err := getAllocatedThreads()
+ 	if err != nil {
+-		t.Fatal(err)
++		t.Fatalf("Cannot retrieve data from procfs getAllocatedThreads function: %v ",err)
+ 	}
+ 	if threads < want {
+ 		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d",threads,want)
+@@ -19,7 +19,7 @@ func TestReadProcessStatus(t *testing.T) {
+ 	}
+ 	max, err := getMaxThreads()
+ 	if err != nil {
+-		t.Fatal(err)
++		t.Fatalf("Cannot retrieve data from procfs getMaxThreads func: %v ",err)
+ 	}
+ 	if max <= 0 {
+ 		t.Fatalf("Maximum allowed amount of threads in the system %d which sould be" +
+
+From f52d2f856e1182201a9a351f4639c722da1a91a9 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Mon, 5 Feb 2018 08:12:26 +0100
+Subject: [PATCH 11/15] Changes as per PR duscissuon
+
+---
+ collector/linux_threads.go      | 35 +++++++++++------------------------
+ collector/linux_threads_test.go | 19 +++++--------------
+ 2 files changed, 16 insertions(+), 38 deletions(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 625e7dcf..0416dab1 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -26,51 +26,51 @@ import (
+ 
+ type threadsCollector struct {
+ 	threadAlloc *prometheus.Desc
+-	threadMax *prometheus.Desc
+-	procsState   *prometheus.Desc
++	threadLimit *prometheus.Desc
++	procsState  *prometheus.Desc
+ }
+ 
+ func init() {
+-	registerCollector("threads", defaultDisabled, NewThreadsCollector)
++	registerCollector("processes", defaultDisabled, NewProcessStatCollector)
+ }
+ 
+-func NewThreadsCollector() (Collector, error) {
++func NewProcessStatCollector() (Collector, error) {
+ 	return &threadsCollector{
+ 		threadAlloc: prometheus.NewDesc(
+ 			prometheus.BuildFQName(namespace, "", "threads"),
+ 			"Allocated threads in system",
+ 			nil, nil,
+ 		),
+-		threadMax: prometheus.NewDesc(
++		threadLimit: prometheus.NewDesc(
+ 			prometheus.BuildFQName(namespace, "threads", "max"),
+ 			"Limit of threads in the system",
+ 			nil, nil,
+ 		),
+ 		procsState: prometheus.NewDesc(
+-			prometheus.BuildFQName(namespace, "", "procs_state"),
++			prometheus.BuildFQName(namespace, "", "processes_state"),
+ 			"Number of processes in each state.",
+ 			[]string{"state"}, nil,
+ 		),
+ 	}, nil
+ }
+ func (t *threadsCollector) Update(ch chan<- prometheus.Metric) error {
+-	states ,threads, err := getAllocatedThreads()
++	states, threads, err := getAllocatedThreads()
+ 	if err != nil {
+ 		return fmt.Errorf("Unable to retrieve number of allocated threads %v\n", err)
+ 	}
+ 	ch <- prometheus.MustNewConstMetric(t.threadAlloc, prometheus.GaugeValue, float64(threads))
+-	maxThreads, err := getMaxThreads()
++	maxThreads, err := readUintFromFile(procFilePath("sys/kernel/threads-max"))
+ 	if err != nil {
+ 		return fmt.Errorf("Unable to retrieve limit number of threads %v\n", err)
+ 	}
+-	ch <- prometheus.MustNewConstMetric(t.threadMax, prometheus.GaugeValue, float64(maxThreads))
++	ch <- prometheus.MustNewConstMetric(t.threadLimit, prometheus.GaugeValue, float64(maxThreads))
+ 	for state := range states {
+ 		ch <- prometheus.MustNewConstMetric(t.procsState, prometheus.GaugeValue, float64(states[state]), state)
+ 	}
+ 	return nil
+ }
+ 
+-func getAllocatedThreads() (map[string]int32,int, error) {
++func getAllocatedThreads() (map[string]int32, int, error) {
+ 	p, err := procfs.AllProcs()
+ 	if err != nil {
+ 		return nil, 0, err
+@@ -86,18 +86,5 @@ func getAllocatedThreads() (map[string]int32,int, error) {
+ 		thread += stat.NumThreads
+ 
+ 	}
+-	return procStates,thread, nil
++	return procStates, thread, nil
+ }
+-
+-func getMaxThreads() (int, error) {
+-	rawData, err := ioutil.ReadFile("/proc/sys/kernel/threads-max")
+-	if err != nil {
+-		return 0, nil
+-	}
+-	maxThreads, err := strconv.Atoi(strings.Trim(string(rawData),"\n"))
+-	if err != nil {
+-		return 0, nil
+-	}
+-	return maxThreads, nil
+-
+-}
+\ No newline at end of file
+diff --git a/collector/linux_threads_test.go b/collector/linux_threads_test.go
+index 933e1f0a..ab39973e 100644
+--- a/collector/linux_threads_test.go
++++ b/collector/linux_threads_test.go
+@@ -8,22 +8,13 @@ func TestReadProcessStatus(t *testing.T) {
+ 	want := 4
+ 	states, threads, err := getAllocatedThreads()
+ 	if err != nil {
+-		t.Fatalf("Cannot retrieve data from procfs getAllocatedThreads function: %v ",err)
++		t.Fatalf("Cannot retrieve data from procfs getAllocatedThreads function: %v ", err)
+ 	}
+ 	if threads < want {
+-		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d",threads,want)
++		t.Fatalf("Current threads: %d Shouldn't be less than wanted %d", threads, want)
+ 	}
+-	if states ==  nil {
++	if states == nil {
+ 
+-		t.Fatalf("Prcess states cannot be nil %v:" ,states)
++		t.Fatalf("Prcess states cannot be nil %v:", states)
+ 	}
+-	max, err := getMaxThreads()
+-	if err != nil {
+-		t.Fatalf("Cannot retrieve data from procfs getMaxThreads func: %v ",err)
+-	}
+-	if max <= 0 {
+-		t.Fatalf("Maximum allowed amount of threads in the system %d which sould be" +
+-			"greated than 0",max)
+-	}
+-
+-}
+\ No newline at end of file
++}
+
+From 84b5e6e67be1ef1f387f7743d744358b6231d957 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Mon, 5 Feb 2018 08:24:16 +0100
+Subject: [PATCH 12/15] Removing unused imports
+
+---
+ collector/linux_threads.go | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index 0416dab1..f8a79ccb 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -19,9 +19,6 @@ import (
+ 	"fmt"
+ 	"github.com/prometheus/client_golang/prometheus"
+ 	"github.com/prometheus/procfs"
+-	"io/ioutil"
+-	"strconv"
+-	"strings"
+ )
+ 
+ type threadsCollector struct {
+
+From 0499cd3a87bad6c8a41c8e891b0de273f585102b Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Fri, 9 Feb 2018 11:33:04 +0100
+Subject: [PATCH 13/15] Fixing tests
+
+---
+ collector/fixtures/e2e-output.txt              | 11 +++++++++++
+ collector/fixtures/proc/10/stat                |  1 +
+ collector/fixtures/proc/sys/kernel/threads-max |  1 +
+ end-to-end-test.sh                             |  2 +-
+ 4 files changed, 14 insertions(+), 1 deletion(-)
+ create mode 100644 collector/fixtures/proc/10/stat
+ create mode 100644 collector/fixtures/proc/sys/kernel/threads-max
+
+diff --git a/collector/fixtures/e2e-output.txt b/collector/fixtures/e2e-output.txt
+index 41b3f162..74ba78bc 100644
+--- a/collector/fixtures/e2e-output.txt
++++ b/collector/fixtures/e2e-output.txt
+@@ -2625,6 +2625,10 @@ node_nfs_rpc_operations 1.218785755e+09
+ # HELP node_nfs_rpc_retransmissions Number of RPC transmissions performed.
+ # TYPE node_nfs_rpc_retransmissions counter
+ node_nfs_rpc_retransmissions 374636
++# HELP node_processes_state Number of processes in each state.
++# TYPE node_processes_state gauge
++node_processes_state{state="R"} 1
++node_processes_state{state="S"} 9
+ # HELP node_procs_blocked Number of processes blocked waiting for I/O to complete.
+ # TYPE node_procs_blocked gauge
+ node_procs_blocked 0
+@@ -2680,6 +2684,7 @@ node_scrape_collector_success{collector="mountstats"} 1
+ node_scrape_collector_success{collector="netdev"} 1
+ node_scrape_collector_success{collector="netstat"} 1
+ node_scrape_collector_success{collector="nfs"} 1
++node_scrape_collector_success{collector="processes"} 1
+ node_scrape_collector_success{collector="qdisc"} 1
+ node_scrape_collector_success{collector="sockstat"} 1
+ node_scrape_collector_success{collector="stat"} 1
+@@ -2734,6 +2739,12 @@ node_sockstat_sockets_used 229
+ # HELP node_textfile_scrape_error 1 if there was an error opening or reading a file, 0 otherwise
+ # TYPE node_textfile_scrape_error gauge
+ node_textfile_scrape_error 0
++# HELP node_threads Allocated threads in system
++# TYPE node_threads gauge
++node_threads 16
++# HELP node_threads_limit Limit of threads in the system
++# TYPE node_threads_limit gauge
++node_threads_limit 7801
+ # HELP node_wifi_interface_frequency_hertz The current frequency a WiFi interface is operating at, in hertz.
+ # TYPE node_wifi_interface_frequency_hertz gauge
+ node_wifi_interface_frequency_hertz{device="wlan0"} 2.412e+09
+diff --git a/collector/fixtures/proc/10/stat b/collector/fixtures/proc/10/stat
+new file mode 100644
+index 00000000..1451c8a4
+--- /dev/null
++++ b/collector/fixtures/proc/10/stat
+@@ -0,0 +1 @@
++17 (khungtaskd) S 2 0 0 0 -1 2129984 0 0 0 0 14 0 0 0 20 0 1 0 24 0 0 18446744073709551615 0 0 0 0 0 0 0 2147483647 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+\ No newline at end of file
+diff --git a/collector/fixtures/proc/sys/kernel/threads-max b/collector/fixtures/proc/sys/kernel/threads-max
+new file mode 100644
+index 00000000..0ccbf457
+--- /dev/null
++++ b/collector/fixtures/proc/sys/kernel/threads-max
+@@ -0,0 +1 @@
++7801
+\ No newline at end of file
+diff --git a/end-to-end-test.sh b/end-to-end-test.sh
+index 0bbec3b1..99c16eb1 100755
+--- a/end-to-end-test.sh
++++ b/end-to-end-test.sh
+@@ -35,6 +35,7 @@ enabled_collectors=$(cat << COLLECTORS
+   wifi
+   xfs
+   zfs
++  processes
+ COLLECTORS
+ )
+ disabled_collectors=$(cat << COLLECTORS
+@@ -43,7 +44,6 @@ disabled_collectors=$(cat << COLLECTORS
+   timex
+   uname
+   vmstat
+-  threads
+ COLLECTORS
+ )
+ cd "$(dirname $0)"
+
+From f05437a9504df99f841b1eadb007f4e8b3ae3d11 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Fri, 9 Feb 2018 11:36:22 +0100
+Subject: [PATCH 14/15] Change metric name for threads from max to limit
+
+---
+ collector/linux_threads.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/collector/linux_threads.go b/collector/linux_threads.go
+index f8a79ccb..96616006 100644
+--- a/collector/linux_threads.go
++++ b/collector/linux_threads.go
+@@ -39,7 +39,7 @@ func NewProcessStatCollector() (Collector, error) {
+ 			nil, nil,
+ 		),
+ 		threadLimit: prometheus.NewDesc(
+-			prometheus.BuildFQName(namespace, "threads", "max"),
++			prometheus.BuildFQName(namespace, "threads", "limit"),
+ 			"Limit of threads in the system",
+ 			nil, nil,
+ 		),
+
+From 9d5c1f58a5d829c27293ddb3e71f35dab154f8d1 Mon Sep 17 00:00:00 2001
+From: Pavel Kutishchev <pavel.kutishchev@olx.com>
+Date: Fri, 9 Feb 2018 11:42:31 +0100
+Subject: [PATCH 15/15] rewert test changes as it not possible to run e2e test
+ against process statistic as prometheus/procfs ignotes proc fs location
+ variable and takes default path
+
+---
+ collector/fixtures/e2e-output.txt | 11 -----------
+ end-to-end-test.sh                |  2 +-
+ 2 files changed, 1 insertion(+), 12 deletions(-)
+
+diff --git a/collector/fixtures/e2e-output.txt b/collector/fixtures/e2e-output.txt
+index 74ba78bc..41b3f162 100644
+--- a/collector/fixtures/e2e-output.txt
++++ b/collector/fixtures/e2e-output.txt
+@@ -2625,10 +2625,6 @@ node_nfs_rpc_operations 1.218785755e+09
+ # HELP node_nfs_rpc_retransmissions Number of RPC transmissions performed.
+ # TYPE node_nfs_rpc_retransmissions counter
+ node_nfs_rpc_retransmissions 374636
+-# HELP node_processes_state Number of processes in each state.
+-# TYPE node_processes_state gauge
+-node_processes_state{state="R"} 1
+-node_processes_state{state="S"} 9
+ # HELP node_procs_blocked Number of processes blocked waiting for I/O to complete.
+ # TYPE node_procs_blocked gauge
+ node_procs_blocked 0
+@@ -2684,7 +2680,6 @@ node_scrape_collector_success{collector="mountstats"} 1
+ node_scrape_collector_success{collector="netdev"} 1
+ node_scrape_collector_success{collector="netstat"} 1
+ node_scrape_collector_success{collector="nfs"} 1
+-node_scrape_collector_success{collector="processes"} 1
+ node_scrape_collector_success{collector="qdisc"} 1
+ node_scrape_collector_success{collector="sockstat"} 1
+ node_scrape_collector_success{collector="stat"} 1
+@@ -2739,12 +2734,6 @@ node_sockstat_sockets_used 229
+ # HELP node_textfile_scrape_error 1 if there was an error opening or reading a file, 0 otherwise
+ # TYPE node_textfile_scrape_error gauge
+ node_textfile_scrape_error 0
+-# HELP node_threads Allocated threads in system
+-# TYPE node_threads gauge
+-node_threads 16
+-# HELP node_threads_limit Limit of threads in the system
+-# TYPE node_threads_limit gauge
+-node_threads_limit 7801
+ # HELP node_wifi_interface_frequency_hertz The current frequency a WiFi interface is operating at, in hertz.
+ # TYPE node_wifi_interface_frequency_hertz gauge
+ node_wifi_interface_frequency_hertz{device="wlan0"} 2.412e+09
+diff --git a/end-to-end-test.sh b/end-to-end-test.sh
+index 99c16eb1..8ca84e14 100755
+--- a/end-to-end-test.sh
++++ b/end-to-end-test.sh
+@@ -35,7 +35,6 @@ enabled_collectors=$(cat << COLLECTORS
+   wifi
+   xfs
+   zfs
+-  processes
+ COLLECTORS
+ )
+ disabled_collectors=$(cat << COLLECTORS
+@@ -44,6 +43,7 @@ disabled_collectors=$(cat << COLLECTORS
+   timex
+   uname
+   vmstat
++  processes
+ COLLECTORS
+ )
+ cd "$(dirname $0)"
