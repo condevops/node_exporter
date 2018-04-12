@@ -18,6 +18,7 @@ package collector
 import (
 	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/log"
 	"github.com/prometheus/procfs"
 )
 
@@ -77,11 +78,11 @@ func getAllocatedThreads() (map[string]int32, int, error) {
 	for _, pid := range p {
 		stat, err := pid.NewStat()
 		if err != nil {
-			return nil, 0, err
+			log.Warnf("processes collector couldn't build stats for pid: %s\n", err)
+		} else {
+			procStates[stat.State] += 1
+			thread += stat.NumThreads
 		}
-		procStates[stat.State] += 1
-		thread += stat.NumThreads
-
 	}
 	return procStates, thread, nil
 }
